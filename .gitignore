@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.pyc
+.db-plan-work/
+DB_OPTIMIZATION_PLAN.xlsx
+DB_OPTIMIZATION_PLAN_csv/
