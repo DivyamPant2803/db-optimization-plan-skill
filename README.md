@@ -65,28 +65,102 @@ The adapter file formats follow each tool's documented conventions; only the ins
 
 ## How to use
 
-Open your AI tool in agent mode in the backend repo.
+1. Install the skill into your backend repo (see Install) and put your audit output where the agent can read it.
+2. Open your AI tool in **agent mode** in that repo.
+3. Paste prompt **1** from [Prompts to copy](#prompts-to-copy) below, filling in the audit path. It produces the plan, the Excel file and the CSVs.
+4. Review the plan, then give each approved work package to a developer or agent with prompt **4** (and prompt **5** for the foundation package).
 
-**Full plan:**
+## Prompts to copy
+
+`SKILL.md` holds the instructions the agent follows once the skill is loaded. These are the prompts you type. Replace the `<...>` placeholders. They work in any tool in agent mode; if your tool does not pick the skill up by itself, start with: "Follow the instructions in `.db-optimization-plan/SKILL.md` exactly."
+
+### 1. Generate the plan (main prompt)
 
 ```text
-Run the db-optimization-plan skill. Use the audit in ./DB_USAGE_REPORT_csv (or the CSV/xlsx/md I point to)
-as input. Propose indexes, table splits, stored procedures and service-level query fixes. Keep
-controllers and API responses unchanged, never edit existing models, tables or services (new ones behind
-a feature flag), include data migration with rollback for every proposal, split the work into packages
-for different developers with no overlapping files, and write DB_OPTIMIZATION_PLAN.md plus the Excel and CSV files.
+Follow the db-optimization-plan skill (.db-optimization-plan/SKILL.md) for this repository.
+
+Input: the DB usage audit at <path to audit CSV, folder of CSVs, xlsx or DB_USAGE_REPORT.md>.
+Runtime data (optional): <paths to Query Store / index usage / table size exports, or "none">.
+
+Goal: propose how to optimize our SQL Server database (indexes, table splits, normalization,
+stored procedures, service-level query fixes) based on the audit and the real code.
+
+Hard rules:
+- Plan only. Do not change code, create migrations or touch any database.
+- Do not change controllers, routes or request/response DTOs.
+- Do not edit existing entities, DbContext configuration, tables, services or migrations.
+  Add new entities, configurations, services and additive EF migrations behind a feature flag
+  so we can roll back by switching back to the old service.
+- Every proposal needs: audit evidence, new-model and new-service design, data migration
+  (batched backfill, how old and new stay in sync, validation, cutover), rollback, tests that
+  prove responses are unchanged, and risk/effort/benefit (marked measured, estimated or unmeasured).
+- List every writer of each old table and say how each is covered.
+- Park anything that cannot follow these rules, with the reason and what would unblock it.
+- Split the work into packages by functionality for different developers or agents, with no file
+  owned by two packages. Give each package its affected controllers (read-only), existing services
+  (read-only), new files, files that must change, dependencies, merge order and a task brief.
+  Put shared files (ModelSnapshot, migrations, DbContext, DI registration, shared base classes,
+  test fixtures) in one foundation package.
+
+Output: DB_OPTIMIZATION_PLAN.md, DB_OPTIMIZATION_PLAN.xlsx and DB_OPTIMIZATION_PLAN_csv/ in the repo root.
+Run the build_plan_outputs.py check and fix every error before you finish. Verify the top candidates
+against the actual code, and tell me what is unmeasured and which Azure data would firm it up.
 ```
 
-**Targeted:**
+### 2. Narrow the scope
 
 ```text
-Use db-optimization-plan, but only for the Orders and OrderLines tables. Index and query fixes first, no table splits.
+Follow the db-optimization-plan skill, but only for the <Orders, OrderLines> tables and the workflows
+that touch them. Start with index and service-level query fixes; do not propose table splits yet.
+Keep all the hard rules and produce the same outputs.
 ```
 
-**Re-export only:**
+### 3. Review or revise an existing plan
 
 ```text
-Rebuild DB_OPTIMIZATION_PLAN.xlsx and the CSVs from DB_OPTIMIZATION_PLAN.md using build_plan_outputs.py.
+Open DB_OPTIMIZATION_PLAN.md. Challenge it against the code: for each accepted proposal check that the
+cited workflows really use those columns, that every writer of the old table is covered, that no controller
+or existing file changes, and that no file appears in two packages. Report problems, fix the plan,
+and re-run build_plan_outputs.py until it reports no errors. Do not implement anything.
+```
+
+### 4. Hand a work package to a developer or coding agent (implementation)
+
+Give each approved package to a different person or agent, one at a time. This prompt is self-contained, so the implementing agent does not need the planning skill. Paste the package's task brief from section 7 of the plan where indicated.
+
+```text
+Implement work package <PKG-03> from DB_OPTIMIZATION_PLAN.md. The task brief is:
+
+<paste the package's task brief>
+
+Rules:
+- Only create or edit the files listed for this package. Do not touch controllers, existing services,
+  existing entities, existing migrations, or any shared file owned by another package.
+- Keep the API unchanged: the new service implements the same interface and returns identical responses.
+- Put the new service behind the feature flag <flag name>; it must default to the OLD service.
+- Do not generate EF migrations or edit the ModelSnapshot; the foundation package owns those. Write entities,
+  configurations, services, tests, and the data migration/backfill and validation scripts described in the plan.
+- Write contract/characterization tests that prove the new service returns the same results as the old one,
+  and validation checks for the data migration (counts, anti-joins, checksums).
+- Do not run anything against a production database.
+When finished, list the files you changed, the tests you ran and their results, and anything in the plan
+that turned out to be wrong or missing.
+```
+
+### 5. Foundation package (migrations, feature flags, DI)
+
+```text
+Implement PKG-00 (foundation) from DB_OPTIMIZATION_PLAN.md: feature flag infrastructure, DI registration for
+the new services behind their flags, and the EF migrations for the other packages in the merge order given
+in section 6 of the plan. Only additive migrations; every Down() must drop only new objects. Index and
+stored-procedure changes go in raw-SQL migrations. Do not modify existing entities or configurations.
+```
+
+### 6. Rebuild the Excel and CSV only
+
+```text
+Run scripts/build_plan_outputs.py on DB_OPTIMIZATION_PLAN.md to regenerate DB_OPTIMIZATION_PLAN.xlsx and the
+CSV files, and report any errors it finds.
 ```
 
 ## Get better plans: bring Azure runtime data
